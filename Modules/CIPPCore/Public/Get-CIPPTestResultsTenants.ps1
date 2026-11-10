@@ -20,7 +20,7 @@ function Get-CIPPTestResultsTenants {
         One or more test IDs (the row's RowKey), e.g. 'CustomScript-<guid>'.
 
     .PARAMETER Status
-        One or more statuses to filter on (Passed / Failed / Investigate / Skipped / Informational).
+        One or more statuses to filter on (Passed / Failed / Investigate / Skipped / Informational / Unlicensed).
 
     .PARAMETER TestType
         Restrict to a single test type (Identity / Devices / Custom).
@@ -156,16 +156,16 @@ function Get-CIPPTestResultsTenants {
     # Property clauses shared by every partition query.
     $FilterParts = [System.Collections.Generic.List[string]]::new()
     if ($TestId) {
-        $TestClause = (@($TestId | Where-Object { $_ }) | ForEach-Object { "RowKey eq '$_'" }) -join ' or '
+        $TestClause = (@($TestId | Where-Object { $_ }) | ForEach-Object { "RowKey eq '$(ConvertTo-CIPPODataFilterValue -Value $_)'" }) -join ' or '
         if ($TestClause) { $FilterParts.Add("($TestClause)") }
     }
     if ($Status) {
-        $StatusClause = (@($Status | Where-Object { $_ }) | ForEach-Object { "Status eq '$_'" }) -join ' or '
+        $StatusClause = (@($Status | Where-Object { $_ }) | ForEach-Object { "Status eq '$(ConvertTo-CIPPODataFilterValue -Value $_)'" }) -join ' or '
         if ($StatusClause) { $FilterParts.Add("($StatusClause)") }
     }
-    if ($TestType) { $FilterParts.Add("TestType eq '$TestType'") }
-    if ($Risk) { $FilterParts.Add("Risk eq '$Risk'") }
-    if ($Category) { $FilterParts.Add("Category eq '$Category'") }
+    if ($TestType) { $FilterParts.Add("TestType eq '$(ConvertTo-CIPPODataFilterValue -Value $TestType)'") }
+    if ($Risk) { $FilterParts.Add("Risk eq '$(ConvertTo-CIPPODataFilterValue -Value $Risk)'") }
+    if ($Category) { $FilterParts.Add("Category eq '$(ConvertTo-CIPPODataFilterValue -Value $Category)'") }
     $PropertyFilter = $FilterParts -join ' and '
 
     $GetParams = @{}
@@ -302,6 +302,7 @@ function Get-CIPPTestResultsTenants {
             'Investigate' { $Counts['Investigate']++ }
             'Skipped' { $Counts['Skipped']++ }
             'Informational' { $Counts['Informational']++ }
+            'Unlicensed' { $Counts['Informational']++ }
         }
 
         if ($RowStatusSet -and -not $RowStatusSet.Contains($StatusValue)) { continue }

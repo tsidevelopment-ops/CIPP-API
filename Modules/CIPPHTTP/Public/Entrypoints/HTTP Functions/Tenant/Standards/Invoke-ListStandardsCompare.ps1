@@ -3,7 +3,7 @@ function Invoke-ListStandardsCompare {
     .FUNCTIONALITY
         Entrypoint
     .ROLE
-        Tenant.BestPracticeAnalyser.Read
+        Tenant.Standards.Read
     .DESCRIPTION
         Compares current tenant configuration against applied standards, showing compliance status and drift for each standard.
     #>
@@ -61,7 +61,7 @@ function Invoke-ListStandardsCompare {
 
     $Filters = [system.collections.generic.list[string]]::new()
     if ($TenantFilter) {
-        $Filters.Add("PartitionKey eq '{0}'" -f $TenantFilter)
+        $Filters.Add("PartitionKey eq '{0}'" -f (ConvertTo-CIPPODataFilterValue -Value $TenantFilter))
     }
     $Filter = $Filters -join ' and '
 

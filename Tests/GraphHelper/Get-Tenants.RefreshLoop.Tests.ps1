@@ -43,7 +43,6 @@ BeforeAll {
             initialDomainName        = $Initial
             delegatedPrivilegeStatus = 'granularDelegatedAdminPrivileges'
             Excluded                 = $false
-            GraphErrorCount          = 0
             LastGraphError           = ''
             RequiresRefresh          = $false
             LastRefresh              = $LastRefresh
@@ -103,6 +102,18 @@ Describe 'Get-Tenants refresh loop' {
             }
             if ($uri -like '*findTenantInformationByTenantId*') { return [PSCustomObject]@{ defaultDomainName = $script:FallbackDomain } }
             throw "unexpected Graph call: $uri"
+        }
+    }
+
+    Context 'default cache read' {
+        It 'does not hide tenants behind an error-count threshold' {
+            # The count is never reset for direct tenants, so a threshold filter drops them for good.
+            $script:RowsByKey[$script:GuidA] = New-CachedRow -Guid $script:GuidA -DisplayName 'Contoso' -Default 'contoso.com' -Initial 'contoso.onmicrosoft.com' -LastRefresh ([DateTimeOffset]::UtcNow)
+
+            $Result = Get-Tenants
+
+            Should -Invoke Get-CIPPAzDataTableEntity -ParameterFilter { $Filter -like '*GraphErrorCount*' } -Times 0 -Exactly
+            $Result.customerId | Should -Be $script:GuidA
         }
     }
 
@@ -220,6 +231,27 @@ Describe 'Get-Tenants refresh loop' {
 
             Should -Invoke Add-CIPPAzDataTableEntity -ParameterFilter { $Entity.RequiresRefresh -eq $true -and $Entity.defaultDomainName -eq 'contoso.onmicrosoft.com' } -Times 1 -Exactly
             $Result.defaultDomainName | Should -Be 'contoso.onmicrosoft.com'
+        }
+
+        It 'keeps a cached .onmicrosoft.com initial domain when the fallback returns a custom domain' {
+            # A custom initial domain becomes delegatedOrg in the portal links and lands on a login prompt.
+            $script:FallbackDomain = 'contoso.com'
+            $script:RowsByKey[$script:GuidA] = New-CachedRow -Guid $script:GuidA -DisplayName 'Contoso' -Default 'contoso.onmicrosoft.com' -Initial 'contoso.onmicrosoft.com' -LastRefresh ([DateTimeOffset]::UtcNow.AddDays(-30))
+
+            $Result = Get-Tenants -IncludeAll -TriggerRefresh
+
+            Should -Invoke Add-CIPPAzDataTableEntity -ParameterFilter { $Entity.RequiresRefresh -eq $true -and $Entity.defaultDomainName -eq 'contoso.com' -and $Entity.initialDomainName -eq 'contoso.onmicrosoft.com' } -Times 1 -Exactly
+            $Result.initialDomainName | Should -Be 'contoso.onmicrosoft.com'
+        }
+
+        It 'replaces a cached custom initial domain with the fallback .onmicrosoft.com one' {
+            # Rows written by the old fallback carry the custom default in initialDomainName.
+            $script:RowsByKey[$script:GuidA] = New-CachedRow -Guid $script:GuidA -DisplayName 'Contoso' -Default 'contoso.com' -Initial 'contoso.com' -LastRefresh ([DateTimeOffset]::UtcNow.AddDays(-30))
+
+            $Result = Get-Tenants -IncludeAll -TriggerRefresh
+
+            Should -Invoke Add-CIPPAzDataTableEntity -ParameterFilter { $Entity.defaultDomainName -eq 'contoso.com' -and $Entity.initialDomainName -eq 'contoso.onmicrosoft.com' } -Times 1 -Exactly
+            $Result.initialDomainName | Should -Be 'contoso.onmicrosoft.com'
         }
     }
 }

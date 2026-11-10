@@ -7,14 +7,18 @@ function Invoke-AddEdgeApp {
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
-    $AllowedTenants = Test-CIPPAccess -Request $Request -TenantList
-    $Tenants = ($Request.Body.selectedTenants | Where-Object { $AllowedTenants -contains $_.customerId -or $AllowedTenants -contains 'AllTenants' }).defaultDomainName
+    $Tenants = (Resolve-CippBulkSelectedTenant -Request $Request -SelectedTenants $Request.Body.selectedTenants).defaultDomainName
     $Headers = $Request.Headers
     $APIName = $Request.Params.CIPPEndpoint
     if ('AllTenants' -in $Tenants) { $Tenants = (Get-Tenants).defaultDomainName }
     $AssignTo = $Request.Body.AssignTo -eq 'customGroup' ? $Request.Body.CustomGroup : $Request.Body.AssignTo
     $ExcludeGroup = $Request.Body.excludeGroup
+    # Group ids from the deploy drawer's single-tenant picker. CustomGroup/excludeGroup still
+    # carry the display names for logging and as a fallback if the ids are ever dropped.
+    $GroupIds = @($Request.Body.GroupIds | Where-Object { $_ })
+    $ExcludeGroupIds = @($Request.Body.ExcludeGroupIds | Where-Object { $_ })
 
+    $Failed = 0
     $Results = foreach ($Tenant in $Tenants) {
         try {
             $ExistingEdge = New-GraphGetRequest -Uri 'https://graph.microsoft.com/beta/deviceAppManagement/mobileApps' -tenantid $Tenant | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.windowsMicrosoftEdgeApp' }
@@ -31,11 +35,23 @@ function Invoke-AddEdgeApp {
             }
             Write-LogMessage -headers $Headers -API $APIName -tenant $($Tenant) -message "Added Edge app to $($Tenant)" -Sev 'Info'
             if ($AssignTo -and $AssignTo -ne 'On') {
-                Set-CIPPAssignedApplication -ApplicationId $EdgeAppID.id -TenantFilter $Tenant -Intent 'Required' -GroupName $AssignTo -ExcludeGroup $ExcludeGroup -APIName $APIName -Headers $Headers
+                $AssignParams = @{
+                    ApplicationId = $EdgeAppID.id
+                    TenantFilter  = $Tenant
+                    Intent        = 'Required'
+                    GroupName     = $AssignTo
+                    ExcludeGroup  = $ExcludeGroup
+                    APIName       = $APIName
+                    Headers       = $Headers
+                }
+                if ($GroupIds.Count -gt 0) { $AssignParams.GroupIds = $GroupIds }
+                if ($ExcludeGroupIds.Count -gt 0) { $AssignParams.ExcludeGroupIds = $ExcludeGroupIds }
+                Set-CIPPAssignedApplication @AssignParams
                 Write-LogMessage -headers $Headers -API $APIName -tenant $($Tenant) -message "Assigned Edge to $AssignTo" -Sev 'Info'
             }
             "Successfully added Edge App for $($Tenant)"
         } catch {
+            $Failed++
             $ErrorMessage = Get-CippException -Exception $_
             "Failed to add Edge App for $($Tenant): $($ErrorMessage.NormalizedError)"
             Write-LogMessage -headers $Headers -API $APIName -tenant $($Tenant) -message "Failed to add Edge App. Error: $($ErrorMessage.NormalizedError)" -Sev 'Error' -Logdata $ErrorMessage
@@ -44,7 +60,7 @@ function Invoke-AddEdgeApp {
     }
 
     return ([HttpResponseContext]@{
-            StatusCode = [HttpStatusCode]::OK
+            StatusCode = Get-CippBulkStatusCode -Total @($Tenants).Count -Failed $Failed
             Body       = @{'Results' = $Results }
         })
 }
